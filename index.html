@@ -304,10 +304,10 @@
             </div>
 
             <div class="chalkboard-box">
-                <div class="total-item"><span>Monthly Hours:</span><span id="dispTotalH">0h 0m</span></div>
-                <div class="total-item line-sep"><span>Gross Monthly Total:</span><span id="dispGross">0</span></div>
+                <div class="total-item"><span>Selected Year Hours:</span><span id="dispTotalH">0h 0m</span></div>
+                <div class="total-item line-sep"><span>Gross Year Total:</span><span id="dispGross">0</span></div>
                 <div class="total-item"><span>Tax Deduction (<span id="dispTaxRate">0</span>%):</span><span id="dispTaxAmt">0</span></div>
-                <div class="total-item line-sep net-due"><span>NET MONTHLY DUE:</span><span id="dispNet">0</span></div>
+                <div class="total-item line-sep net-due"><span>NET YEAR DUE:</span><span id="dispNet">0</span></div>
             </div>
 
             <div class="white-card no-print" style="margin-top:20px;">
@@ -335,6 +335,11 @@
             <div class="controls no-print">
                 <button onclick="saveAllData(true)">💾 SAVE ALL DATA</button>
                 <button onclick="window.print()">🖨️ PRINT PDF</button>
+                <button onclick="exportToJson()">📤 EXPORT BACKUP</button>
+                <button onclick="exportToCsv()" style="color: #28a745;">📊 EXPORT EXCEL (CSV)</button>
+                <button onclick="document.getElementById('importFile').click()">📥 IMPORT BACKUP</button>
+                <input type="file" id="importFile" style="display:none" accept=".json" onchange="importFromJson(event)">
+                
                 <button class="btn-clear-tab" onclick="clearCurrentSchool()">🗑️ CLEAR TAB</button>
                 <button class="btn-clear-all" onclick="clearEverything()">⚠️ CLEAR ALL DATA</button>
             </div>
@@ -500,31 +505,99 @@
         const body = document.getElementById('tableBody');
         const yrFilter = document.getElementById('yearFilter').value;
         body.innerHTML = '';
-        let totalDec = 0; let annualAgg = {};
+        
+        let totalDec = 0; 
+        let annualAgg = {}; 
+        let yearGrandMoney = 0;
+
         school.logs.sort((a,b) => new Date(b.date) - new Date(a.date)).forEach(l => {
-            const y = l.date.substring(0,4); const m = l.date.substring(0,7); const pay = l.dec * school.rate;
-            totalDec += l.dec;
-            if(y === yrFilter) annualAgg[m] = (annualAgg[m] || 0) + pay;
-            body.innerHTML += `<tr><td>${l.date}</td><td>${l.range}</td><td>${l.dec.toFixed(2)}h</td><td>${format(pay, school.currency)}</td><td class="no-print"><i class="fas fa-trash" style="color:#ddd;cursor:pointer" onclick="deleteLog(${l.id})"></i></td></tr>`;
+            const y = l.date.substring(0,4); 
+            const m = l.date.substring(0,7); 
+            const pay = l.dec * school.rate;
+
+            if(y === yrFilter) {
+                totalDec += l.dec;
+                yearGrandMoney += pay;
+                annualAgg[m] = (annualAgg[m] || 0) + pay;
+                body.innerHTML += `<tr><td>${l.date}</td><td>${l.range}</td><td>${l.dec.toFixed(2)}h</td><td>${format(pay, school.currency)}</td><td class="no-print"><i class="fas fa-trash" style="color:#ddd;cursor:pointer" onclick="deleteLog(${l.id})"></i></td></tr>`;
+            }
         });
-        const gross = totalDec * school.rate; const taxAmt = gross * (school.tax / 100); const net = gross - taxAmt;
+
+        const gross = totalDec * school.rate; 
+        const taxAmt = gross * (school.tax / 100); 
+        const net = gross - taxAmt;
+
         document.getElementById('dispTotalH').innerText = `${Math.floor(totalDec)}h ${Math.round((totalDec%1)*60)}m`;
         document.getElementById('dispGross').innerText = format(gross, school.currency);
         document.getElementById('dispTaxRate').innerText = school.tax.toFixed(1);
         document.getElementById('dispTaxAmt').innerText = "- " + format(taxAmt, school.currency);
         document.getElementById('dispNet').innerText = format(net, school.currency);
+
         const histDiv = document.getElementById('annualHistory'); histDiv.innerHTML = '';
         const months = Object.keys(annualAgg).sort().reverse();
-        if(months.length === 0) histDiv.innerHTML = `<p style="text-align:center; color:#999;">No records</p>`;
-        else months.forEach(k => {
-            const d = new Date(k + "-02");
-            histDiv.innerHTML += `<div class="history-row"><strong>${d.toLocaleString('default',{month:'long',year:'numeric'})}</strong><span>${format(annualAgg[k], school.currency)}</span></div>`;
-        });
+
+        if(months.length === 0) {
+            histDiv.innerHTML = `<p style="text-align:center; color:#999;">No records for ${yrFilter}</p>`;
+        } else {
+            months.forEach(k => {
+                const d = new Date(k + "-02");
+                histDiv.innerHTML += `<div class="history-row"><strong>${d.toLocaleString('default',{month:'long',year:'numeric'})}</strong><span>${format(annualAgg[k], school.currency)}</span></div>`;
+            });
+            // Add a total footer for the year
+            histDiv.innerHTML += `<div class="history-row" style="border-top: 2px solid #aaa; margin-top:10px; padding-top:10px; font-weight:bold; color:var(--ui-accent);">
+                <strong>YEAR TOTAL (${yrFilter})</strong><span>${format(yearGrandMoney, school.currency)}</span>
+            </div>`;
+        }
         updateHeaderUI(JSON.parse(localStorage.getItem(GLOBAL_KEY)) || {});
     }
 
     function clearCurrentSchool() { if(confirm("Erase logs?")) { allSchools[activeIdx].logs = []; saveAllData(); renderTable(); } }
     function clearEverything() { if(confirm("Delete EVERYTHING?")) { localStorage.clear(); location.reload(); } }
+
+    function exportToJson() {
+        const data = { schools: allSchools, global: JSON.parse(localStorage.getItem(GLOBAL_KEY)) };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `timesheet_backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+    }
+
+    function exportToCsv() {
+        let csv = "School,Teacher,Date,Time Range,Hours,Rate,Gross Pay,Tax %,Net Pay,Currency\n";
+        const teacher = document.getElementById('teacherName').value;
+        allSchools.forEach(s => {
+            s.logs.forEach(l => {
+                const gross = l.dec * s.rate;
+                const net = gross * (1 - (s.tax/100));
+                csv += `"${s.name}","${teacher}",${l.date},${l.range},${l.dec.toFixed(2)},${s.rate},${gross.toFixed(2)},${s.tax},${net.toFixed(2)},${s.currency}\n`;
+            });
+        });
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `timesheet_export_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+    }
+
+    function importFromJson(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.schools && data.global) {
+                    if (confirm("Restore from backup? This will overwrite current data.")) {
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(data.schools));
+                        localStorage.setItem(GLOBAL_KEY, JSON.stringify(data.global));
+                        location.reload();
+                    }
+                } else { alert("Invalid file format."); }
+            } catch (err) { alert("Error parsing file."); }
+        };
+        reader.readAsText(file);
+    }
 </script>
 </body>
 </html>
