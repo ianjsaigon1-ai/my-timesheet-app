@@ -643,20 +643,51 @@
     }
 
     function importFromJson(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = JSON.parse(e.target.result);
-                if (data.schools) {
-                    allSchools = data.schools;
-                    saveAllData(); location.reload();
-                }
-            } catch (err) { alert("Error parsing file."); }
-        };
-        reader.readAsText(file);
-    }
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+        try {
+            const data = JSON.parse(e.target.result);
+
+            // ✅ Handle both formats
+            if (data.schools) {
+                allSchools = data.schools;
+            } else if (Array.isArray(data)) {
+                allSchools = data;
+            } else {
+                throw new Error("Invalid format");
+            }
+
+            // ✅ Fix missing fields (VERY IMPORTANT)
+            allSchools.forEach(school => {
+                if (!school.logs) school.logs = [];
+
+                school.logs.forEach(log => {
+                    if (!log.paid) log.paid = false;
+                    if (!log.dec) log.dec = 0;
+                });
+            });
+
+            // ✅ Save + refresh properly
+            saveAllData();
+
+            // 🔥 Better than reload
+            if (typeof render === "function") render();
+            if (typeof updateSummary === "function") updateSummary();
+
+            alert("✅ Import successful!");
+
+        } catch (err) {
+            alert("❌ Import failed: Invalid or incompatible file.");
+            console.error(err);
+        }
+    };
+
+    reader.readAsText(file);
+}
 </script>
 </body>
 </html>
