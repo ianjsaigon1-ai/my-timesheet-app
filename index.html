@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -48,7 +48,6 @@
             z-index: 10000;
         }
 
-        /* FIXED TABS: Wrap to fit one page, no scroll */
         .tab-wrapper {
             width: 100%;
             max-width: 950px;
@@ -188,7 +187,6 @@
         .grand-item { font-size: 0.95rem; color: #fdfd96; }
         .grand-label { font-size: 0.6rem; color: #fff; text-transform: uppercase; margin-bottom: 3px; opacity: 0.8; }
 
-        /* Annual Box Style */
         .annual-box {
             background: var(--annual-bg); border: 5px solid #34495e; padding: 15px; 
             border-radius: 12px; font-family: 'Gloria Hallelujah', cursive;
@@ -305,7 +303,6 @@
                     </div>
                 </div>
 
-                <!-- Annual Running Total Box -->
                 <div class="annual-box">
                     <h3 style="font-size: 0.8rem; text-decoration: underline; color: #fdfd96;">ANNUAL RUNNING TOTAL (YEAR TO DATE)</h3>
                     <div class="annual-grid">
@@ -358,6 +355,47 @@
         loadGlobal();
         renderTabs();
         switchTab(0);
+    }
+
+    /**
+     * CALENDAR-BASED WEEK LOGIC (Monday-Sunday):
+     * Groups by actual Monday-Sunday weeks, but clips labels to month boundaries.
+     */
+    function getWeekLabel(dateStr) {
+        const date = new Date(dateStr);
+        const day = date.getDay(); 
+        const year = date.getFullYear();
+        const month = date.getMonth();
+
+        // 1. Find the actual Monday of this calendar week
+        const diffToMonday = date.getDate() - (day === 0 ? 6 : day - 1);
+        let monday = new Date(year, month, diffToMonday);
+        
+        // 2. Find the actual Sunday of this calendar week
+        let sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+
+        // 3. CLIP: If Monday is in the previous month, start at the 1st
+        if (monday.getMonth() !== month) {
+            monday = new Date(year, month, 1);
+        }
+
+        // 4. CLIP: If Sunday is in the next month, end at the last day
+        if (sunday.getMonth() !== month) {
+            sunday = new Date(year, month + 1, 0);
+        }
+
+        const mNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${mNames[monday.getMonth()]} ${monday.getDate()} - ${mNames[sunday.getMonth()]} ${sunday.getDate()}`;
+    }
+
+    // Helper for chronological sorting
+    function getWeekSortValue(dateStr) {
+        const date = new Date(dateStr);
+        const day = date.getDay();
+        const diffToMonday = date.getDate() - (day === 0 ? 6 : day - 1);
+        const monday = new Date(date.getFullYear(), date.getMonth(), diffToMonday);
+        return monday.getTime();
     }
 
     function renderTabs() {
@@ -450,15 +488,6 @@
         saveAllData(); renderTable();
     }
 
-    function getWeekLabel(dateStr) {
-    const day = new Date(dateStr).getDate();
-    if (day <= 7) return "WEEK 1";
-    if (day <= 14) return "WEEK 2";
-    if (day <= 21) return "WEEK 3";
-    if (day <= 28) return "WEEK 4";
-    return "WEEK 5"; // ✅ FIXED
-}
-
     function renderSummary() {
         const container = document.getElementById('summarySections');
         container.innerHTML = '';
@@ -471,7 +500,6 @@
         const mainCurrency = allSchools[0].currency;
 
         allSchools.forEach((school, sIdx) => {
-            // Annual totals for all logs in this year
             school.logs.forEach(l => {
                 if(l.date.startsWith(selY)) {
                     const gross = l.dec * school.rate;
@@ -482,33 +510,35 @@
                 }
             });
 
-            // Monthly breakdown
             const logs = school.logs.filter(l => l.date.substring(0, 7) === filterKey);
             if(logs.length === 0) return;
 
             const weekly = {};
             logs.forEach(l => {
-                const wk = getWeekLabel(l.date);
-                if(!weekly[wk]) weekly[wk] = { hrs: 0, gross: 0, net: 0, paid: true };
+                const label = getWeekLabel(l.date);
+                if(!weekly[label]) {
+                    weekly[label] = { hrs: 0, gross: 0, net: 0, paid: true, sortKey: getWeekSortValue(l.date) };
+                }
                 const gross = l.dec * school.rate;
                 const net = gross * (1 - (school.tax/100));
-                weekly[wk].hrs += l.dec;
-                weekly[wk].gross += gross;
-                weekly[wk].net += net;
-                if(!l.paid) weekly[wk].paid = false;
+                weekly[label].hrs += l.dec;
+                weekly[label].gross += gross;
+                weekly[label].net += net;
+                if(!l.paid) weekly[label].paid = false;
             });
 
             let sHrs = 0, sGross = 0, sNet = 0;
             let rows = '';
-            Object.keys(weekly).sort().forEach(wk => {
-                const w = weekly[wk];
+            
+            Object.keys(weekly).sort((a, b) => weekly[a].sortKey - weekly[b].sortKey).forEach(label => {
+                const w = weekly[label];
                 sHrs += w.hrs; sGross += w.gross; sNet += w.net;
                 rows += `<tr>
-                    <td>${wk}</td>
+                    <td>${label}</td>
                     <td>${w.hrs.toFixed(2)}h</td>
                     <td>${format(w.gross, school.currency)}</td>
                     <td>${format(w.net, school.currency)}</td>
-                    <td class="no-print"><button class="status-btn ${w.paid ? 'paid' : 'pending'}" onclick="toggleWeekPaid(${sIdx}, '${wk}', ${!w.paid})">${w.paid ? 'PAID' : 'PENDING'}</button></td>
+                    <td class="no-print"><button class="status-btn ${w.paid ? 'paid' : 'pending'}" onclick="toggleWeekPaid(${sIdx}, '${label}', ${!w.paid})">${w.paid ? 'PAID' : 'PENDING'}</button></td>
                 </tr>`;
             });
 
@@ -536,10 +566,10 @@
         document.getElementById('annNet').innerText = format(annNetTotal, mainCurrency);
     }
 
-    function toggleWeekPaid(sIdx, wk, status) {
+    function toggleWeekPaid(sIdx, label, status) {
         const filterKey = `${document.getElementById('yearFilter').value}-${document.getElementById('monthFilter').value}`;
         allSchools[sIdx].logs.forEach(l => {
-            if(l.date.substring(0,7) === filterKey && getWeekLabel(l.date) === wk) l.paid = status;
+            if(l.date.substring(0,7) === filterKey && getWeekLabel(l.date) === label) l.paid = status;
         });
         saveAllData(); refreshView();
     }
@@ -643,51 +673,29 @@
     }
 
     function importFromJson(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = (e) => {
-        try {
-            const data = JSON.parse(e.target.result);
-
-            // ✅ Handle both formats
-            if (data.schools) {
-                allSchools = data.schools;
-            } else if (Array.isArray(data)) {
-                allSchools = data;
-            } else {
-                throw new Error("Invalid format");
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = JSON.parse(e.target.result);
+                if (data.schools) {
+                    allSchools = data.schools;
+                    if (data.global) {
+                        localStorage.setItem(GLOBAL_KEY, JSON.stringify(data.global));
+                        document.getElementById('teacherName').value = data.global.teacher || "";
+                    }
+                } else if (Array.isArray(data)) {
+                    allSchools = data;
+                } else { throw new Error(); }
+                saveAllData();
+                location.reload(); 
+            } catch (err) {
+                alert("❌ Import failed: Invalid file.");
             }
-
-            // ✅ Fix missing fields (VERY IMPORTANT)
-            allSchools.forEach(school => {
-                if (!school.logs) school.logs = [];
-
-                school.logs.forEach(log => {
-                    if (!log.paid) log.paid = false;
-                    if (!log.dec) log.dec = 0;
-                });
-            });
-
-            // ✅ Save + refresh properly
-            saveAllData();
-
-            // 🔥 Better than reload
-            if (typeof render === "function") render();
-            if (typeof updateSummary === "function") updateSummary();
-
-            alert("✅ Import successful!");
-
-        } catch (err) {
-            alert("❌ Import failed: Invalid or incompatible file.");
-            console.error(err);
-        }
-    };
-
-    reader.readAsText(file);
-}
+        };
+        reader.readAsText(file);
+    }
 </script>
 </body>
 </html>
